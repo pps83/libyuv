@@ -386,6 +386,7 @@ static void ScaleARGBBilinearUp(int src_width,
                               int dst_width, int x, int dx) =
       filtering ? ScaleARGBFilterCols_C : ScaleARGBCols_C;
   const int max_y = (src_height - 1) << 16;
+  const int max_x = (src_width - 1) << 16;
 #if defined(HAS_INTERPOLATEROW_SSSE3)
   if (TestCpuFlag(kCpuHasSSSE3)) {
     InterpolateRow = InterpolateRow_Any_SSSE3;
@@ -477,52 +478,77 @@ static void ScaleARGBBilinearUp(int src_width,
     y = max_y;
   }
 
-  {
-    int yi = y >> 16;
-    const uint8_t* src = src_argb + yi * src_stride;
+  int yi = y >> 16;
+  const uint8_t* src = src_argb + yi * src_stride;
 
-    // Allocate 2 rows of ARGB.
-    const int kRowSize = (dst_width * 4 + 31) & ~31;
-    align_buffer_64(row, kRowSize * 2);
+  // Allocate 2 rows of ARGB.
+  const int kRowSize = (dst_width * 4 + 31) & ~31;
+  align_buffer_64(row, kRowSize * 2);
 
-    uint8_t* rowptr = row;
-    int rowstride = kRowSize;
-    int lasty = yi;
+  uint8_t* rowptr = row;
+  int rowstride = kRowSize;
+  int lasty = yi;
+  int off_y = (x + dx * dst_width - max_x + dx - 1) / dx;
+  int off_x = (x < 0) ? (-x + dx - 1) / dx : 0;
+  x += off_x*dx;
 
-    ScaleARGBFilterCols(rowptr, src, dst_width, x, dx);
-    if (src_height > 1) {
-      src += src_stride;
-    }
-    ScaleARGBFilterCols(rowptr + rowstride, src, dst_width, x, dx);
+#define SCALE_ROW(rowptr, src, dst_width, x, dx)                 \
+  do                                                             \
+  {                                                              \
+    if (dst_width > off_x + off_y) {                             \
+      ScaleARGBFilterCols((rowptr) + 4 * off_x, src, dst_width - \
+        (off_x + off_y), x, dx);                                 \
+    }                                                            \
+    for (int i = 0; i < off_x; ++i) {                            \
+      ((uint32_t*)(rowptr))[i] = ((uint32_t*)src)[0];            \
+    }                                                            \
+    for (int i = 0; i < off_y; ++i) {                            \
+      ((uint32_t*)(rowptr))[dst_width - 1 - i] =                 \
+        ((uint32_t*)src)[src_width - 1];                         \
+    }                                                            \
+  } while (0) /**/
+
+  if (yi == -1) {
     src += src_stride;
-
-    for (j = 0; j < dst_height; ++j) {
-      yi = y >> 16;
-      if (yi != lasty) {
-        if (y > max_y) {
-          y = max_y;
-          yi = y >> 16;
-          src = src_argb + yi * src_stride;
-        }
-        if (yi != lasty) {
-          ScaleARGBFilterCols(rowptr, src, dst_width, x, dx);
-          rowptr += rowstride;
-          rowstride = -rowstride;
-          lasty = yi;
-          src += src_stride;
-        }
-      }
-      if (filtering == kFilterLinear) {
-        InterpolateRow(dst_argb, rowptr, 0, dst_width * 4, 0);
-      } else {
-        int yf = (y >> 8) & 255;
-        InterpolateRow(dst_argb, rowptr, rowstride, dst_width * 4, yf);
-      }
-      dst_argb += dst_stride;
-      y += dy;
-    }
-    free_aligned_buffer_64(row);
   }
+  SCALE_ROW(rowptr, src, dst_width, x, dx);
+  if (src_height > 1) {
+    src += src_stride;
+  }
+  if (yi == -1) {
+    memcpy(rowptr + rowstride, rowptr, rowstride);
+  } else {
+    SCALE_ROW(rowptr + rowstride, src, dst_width, x, dx);
+    src += src_stride;
+  }
+
+  for (j = 0; j < dst_height; ++j) {
+    yi = y >> 16;
+    if (yi != lasty) {
+      if (y > max_y) {
+        y = max_y;
+        yi = y >> 16;
+        src = src_argb + yi * src_stride;
+      }
+      if (yi != lasty) {
+        SCALE_ROW(rowptr, src, dst_width, x, dx);
+        rowptr += rowstride;
+        rowstride = -rowstride;
+        lasty = yi;
+        src += src_stride;
+      }
+    }
+    if (filtering == kFilterLinear) {
+      InterpolateRow(dst_argb, rowptr, 0, dst_width * 4, 0);
+    } else {
+      int yf = (y >> 8) & 255;
+      InterpolateRow(dst_argb, rowptr, rowstride, dst_width * 4, yf);
+    }
+    dst_argb += dst_stride;
+    y += dy;
+  }
+  free_aligned_buffer_64(row);
+#undef SCALE_ROW
 }
 
 #ifdef YUVSCALEUP
