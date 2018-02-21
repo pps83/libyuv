@@ -17,6 +17,7 @@
 #include "libyuv/planar_functions.h"  // For CopyARGB
 #include "libyuv/row.h"
 #include "libyuv/scale_row.h"
+#include "internal.h"
 
 #ifdef __cplusplus
 namespace libyuv {
@@ -386,6 +387,7 @@ static void ScaleARGBBilinearUp(int src_width,
                               int dst_width, int x, int dx) =
       filtering ? ScaleARGBFilterCols_C : ScaleARGBCols_C;
   const int max_y = (src_height - 1) << 16;
+  const int max_x = (src_width - 1) << 16;
 #if defined(HAS_INTERPOLATEROW_SSSE3)
   if (TestCpuFlag(kCpuHasSSSE3)) {
     InterpolateRow = InterpolateRow_Any_SSSE3;
@@ -478,8 +480,8 @@ static void ScaleARGBBilinearUp(int src_width,
   }
 
   {
-    int yi = y >> 16;
-    const uint8_t* src = src_argb + yi * src_stride;
+    int yi = y >> 16; // yi should be -1
+    const uint8_t* src = src_argb + (yi > 0 ? yi * src_stride : 0);
 
     // Allocate 2 rows of ARGB.
     const int kRowSize = (dst_width * 4 + 31) & ~31;
@@ -488,13 +490,31 @@ static void ScaleARGBBilinearUp(int src_width,
     uint8_t* rowptr = row;
     int rowstride = kRowSize;
     int lasty = yi;
+    // count of destination pixels that would require reading before src[0],
+    // or after src[src_width]
+    int edge = (x < 0) ? (-x + dx - 1) / dx :
+      ((x > max_x) ? (- x + dx - 1 + max_x) / dx : 0);
+    x += edge * dx;
+    dst_width -= 2 * edge;
 
-    ScaleARGBFilterCols(rowptr, src, dst_width, x, dx);
+    assert(dst_width > 0);
+    assert(dx < 0 || (x >= 0));
+    assert(dx < 0 || (x + (dst_width - 1) * dx <= max_x));
+    assert(dx > 0 || (x <= max_x));
+    assert(dx > 0 || (x + (dst_width - 1) * dx >= 0));
+
+    FILTER_COLS(ScaleARGBFilterCols, uint32_t, rowptr, edge, src, dst_width, x,
+      dx);
     if (src_height > 1) {
       src += src_stride;
     }
-    ScaleARGBFilterCols(rowptr + rowstride, src, dst_width, x, dx);
-    src += src_stride;
+    if (yi == -1) {
+      memcpy(rowptr + rowstride, rowptr, rowstride);
+    } else {
+      FILTER_COLS(ScaleARGBFilterCols, uint32_t, rowptr + rowstride, edge, src,
+        dst_width, x, dx);
+      src += src_stride;
+    }
 
     for (j = 0; j < dst_height; ++j) {
       yi = y >> 16;
@@ -505,7 +525,8 @@ static void ScaleARGBBilinearUp(int src_width,
           src = src_argb + yi * src_stride;
         }
         if (yi != lasty) {
-          ScaleARGBFilterCols(rowptr, src, dst_width, x, dx);
+          FILTER_COLS(ScaleARGBFilterCols, uint32_t, rowptr, edge, src,
+            dst_width, x, dx);
           rowptr += rowstride;
           rowstride = -rowstride;
           lasty = yi;
@@ -513,10 +534,11 @@ static void ScaleARGBBilinearUp(int src_width,
         }
       }
       if (filtering == kFilterLinear) {
-        InterpolateRow(dst_argb, rowptr, 0, dst_width * 4, 0);
+        InterpolateRow(dst_argb, rowptr, 0, (dst_width + 2 * edge) * 4, 0);
       } else {
         int yf = (y >> 8) & 255;
-        InterpolateRow(dst_argb, rowptr, rowstride, dst_width * 4, yf);
+        InterpolateRow(dst_argb, rowptr, rowstride, (dst_width + 2 * edge) * 4,
+          yf);
       }
       dst_argb += dst_stride;
       y += dy;

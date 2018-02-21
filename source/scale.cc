@@ -17,6 +17,7 @@
 #include "libyuv/planar_functions.h"  // For CopyPlane
 #include "libyuv/row.h"
 #include "libyuv/scale_row.h"
+#include "internal.h"
 
 #ifdef __cplusplus
 namespace libyuv {
@@ -1141,6 +1142,7 @@ void ScalePlaneBilinearUp(int src_width,
   int dx = 0;
   int dy = 0;
   const int max_y = (src_height - 1) << 16;
+  const int max_x = (src_width - 1) << 16;
   void (*InterpolateRow)(uint8_t * dst_ptr, const uint8_t* src_ptr,
                          ptrdiff_t src_stride, int dst_width,
                          int source_y_fraction) = InterpolateRow_C;
@@ -1213,8 +1215,8 @@ void ScalePlaneBilinearUp(int src_width,
     y = max_y;
   }
   {
-    int yi = y >> 16;
-    const uint8_t* src = src_ptr + yi * src_stride;
+    int yi = y >> 16; // yi should be -1
+    const uint8_t* src = src_ptr + (yi > 0 ? yi * src_stride : 0);
 
     // Allocate 2 row buffers.
     const int kRowSize = (dst_width + 31) & ~31;
@@ -1223,13 +1225,30 @@ void ScalePlaneBilinearUp(int src_width,
     uint8_t* rowptr = row;
     int rowstride = kRowSize;
     int lasty = yi;
+    // count of destination pixels that would require reading before src[0],
+    // or after src[src_width]
+    int edge = (x < 0) ? (-x + dx - 1) / dx :
+      ((x > max_x) ? (- x + dx - 1 + max_x) / dx : 0);
+    x += edge * dx;
+    dst_width -= 2 * edge;
 
-    ScaleFilterCols(rowptr, src, dst_width, x, dx);
+    assert(dst_width > 0);
+    assert(dx < 0 || (x >= 0));
+    assert(dx < 0 || (x + (dst_width - 1) * dx <= max_x));
+    assert(dx > 0 || (x <= max_x));
+    assert(dx > 0 || (x + (dst_width - 1) * dx >= 0));
+
+    FILTER_COLS(ScaleFilterCols, uint8_t, rowptr, edge, src, dst_width, x, dx);
     if (src_height > 1) {
       src += src_stride;
     }
-    ScaleFilterCols(rowptr + rowstride, src, dst_width, x, dx);
-    src += src_stride;
+    if (yi == -1) {
+      memcpy(rowptr + rowstride, rowptr, rowstride);
+    } else {
+      FILTER_COLS(ScaleFilterCols, uint8_t, rowptr + rowstride, edge, src,
+        dst_width, x, dx);
+      src += src_stride;
+    }
 
     for (j = 0; j < dst_height; ++j) {
       yi = y >> 16;
@@ -1240,7 +1259,8 @@ void ScalePlaneBilinearUp(int src_width,
           src = src_ptr + yi * src_stride;
         }
         if (yi != lasty) {
-          ScaleFilterCols(rowptr, src, dst_width, x, dx);
+          FILTER_COLS(ScaleFilterCols, uint8_t, rowptr, edge, src, dst_width,
+            x, dx);
           rowptr += rowstride;
           rowstride = -rowstride;
           lasty = yi;
@@ -1248,10 +1268,10 @@ void ScalePlaneBilinearUp(int src_width,
         }
       }
       if (filtering == kFilterLinear) {
-        InterpolateRow(dst_ptr, rowptr, 0, dst_width, 0);
+        InterpolateRow(dst_ptr, rowptr, 0, (dst_width + 2 * edge), 0);
       } else {
         int yf = (y >> 8) & 255;
-        InterpolateRow(dst_ptr, rowptr, rowstride, dst_width, yf);
+        InterpolateRow(dst_ptr, rowptr, rowstride, (dst_width + 2 * edge), yf);
       }
       dst_ptr += dst_stride;
       y += dy;
@@ -1276,6 +1296,7 @@ void ScalePlaneBilinearUp_16(int src_width,
   int dx = 0;
   int dy = 0;
   const int max_y = (src_height - 1) << 16;
+  const int max_x = (src_width - 1) << 16;
   void (*InterpolateRow)(uint16_t * dst_ptr, const uint16_t* src_ptr,
                          ptrdiff_t src_stride, int dst_width,
                          int source_y_fraction) = InterpolateRow_16_C;
@@ -1340,8 +1361,8 @@ void ScalePlaneBilinearUp_16(int src_width,
     y = max_y;
   }
   {
-    int yi = y >> 16;
-    const uint16_t* src = src_ptr + yi * src_stride;
+    int yi = y >> 16; // yi should be -1
+    const uint16_t* src = src_ptr + (yi > 0 ? yi * src_stride : 0);
 
     // Allocate 2 row buffers.
     const int kRowSize = (dst_width + 31) & ~31;
@@ -1350,13 +1371,30 @@ void ScalePlaneBilinearUp_16(int src_width,
     uint16_t* rowptr = (uint16_t*)row;
     int rowstride = kRowSize;
     int lasty = yi;
+    // count of destination pixels that would require reading before src[0],
+    // or after src[src_width]
+    int edge = (x < 0) ? (-x + dx - 1) / dx :
+      ((x > max_x) ? (- x + dx - 1 + max_x) / dx : 0);
+    x += edge * dx;
+    dst_width -= 2 * edge;
 
-    ScaleFilterCols(rowptr, src, dst_width, x, dx);
+    assert(dst_width > 0);
+    assert(dx < 0 || (x >= 0));
+    assert(dx < 0 || (x + (dst_width - 1) * dx <= max_x));
+    assert(dx > 0 || (x <= max_x));
+    assert(dx > 0 || (x + (dst_width - 1) * dx >= 0));
+
+    FILTER_COLS(ScaleFilterCols, uint16_t, rowptr, edge, src, dst_width, x, dx);
     if (src_height > 1) {
       src += src_stride;
     }
-    ScaleFilterCols(rowptr + rowstride, src, dst_width, x, dx);
-    src += src_stride;
+    if (yi == -1) {
+      memcpy(rowptr + rowstride, rowptr, rowstride);
+    } else {
+      FILTER_COLS(ScaleFilterCols, uint16_t, rowptr + rowstride, edge, src,
+        dst_width, x, dx);
+      src += src_stride;
+    }
 
     for (j = 0; j < dst_height; ++j) {
       yi = y >> 16;
@@ -1367,7 +1405,8 @@ void ScalePlaneBilinearUp_16(int src_width,
           src = src_ptr + yi * src_stride;
         }
         if (yi != lasty) {
-          ScaleFilterCols(rowptr, src, dst_width, x, dx);
+          FILTER_COLS(ScaleFilterCols, uint16_t, rowptr, edge, src, dst_width,
+            x, dx);
           rowptr += rowstride;
           rowstride = -rowstride;
           lasty = yi;
@@ -1375,10 +1414,10 @@ void ScalePlaneBilinearUp_16(int src_width,
         }
       }
       if (filtering == kFilterLinear) {
-        InterpolateRow(dst_ptr, rowptr, 0, dst_width, 0);
+        InterpolateRow(dst_ptr, rowptr, 0, (dst_width + 2 * edge), 0);
       } else {
         int yf = (y >> 8) & 255;
-        InterpolateRow(dst_ptr, rowptr, rowstride, dst_width, yf);
+        InterpolateRow(dst_ptr, rowptr, rowstride, (dst_width + 2 * edge), yf);
       }
       dst_ptr += dst_stride;
       y += dy;
