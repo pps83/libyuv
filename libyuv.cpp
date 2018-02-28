@@ -7,7 +7,6 @@
 
 #include "source/compare.cc"
 #include "source/compare_common.cc"
-#include "source/compare_win.cc"
 #include "source/convert.cc"
 #include "source/convert_argb.cc"
 
@@ -30,14 +29,12 @@
 #include "source/rotate_any.cc"
 #include "source/rotate_argb.cc"
 #include "source/rotate_common.cc"
-#include "source/rotate_win.cc"
 #include "source/row_any.cc"
 
 #define Abs Abs_2
 #include "source/row_common.cc"
 #undef Abs
 
-#include "source/row_win.cc"
 
 #define Abs Abs_3
 #include "source/scale.cc"
@@ -53,5 +50,24 @@
 #include "source/scale_common.cc"
 #undef Abs
 
-#include "source/scale_win.cc"
 #include "source/video_common.cc"
+
+#include "source/compare_win.cc"
+#include "source/rotate_win.cc"
+#include "source/row_win.cc"
+#include "source/scale_win.cc"
+
+#include "source/compare_gcc.cc"
+#include "source/rotate_gcc.cc"
+#include "source/row_gcc.cc"
+#include "source/scale_gcc.cc"
+
+#include "source/compare_neon.cc"
+#include "source/rotate_neon.cc"
+#include "source/row_neon.cc"
+#include "source/scale_neon.cc"
+
+#include "source/compare_neon64.cc"
+#include "source/rotate_neon64.cc"
+#include "source/row_neon64.cc"
+#include "source/scale_neon64.cc"
