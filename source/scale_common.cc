@@ -1248,8 +1248,8 @@ void ScaleSlope(int src_width,
   } else if (filtering == kFilterBilinear) {
     // Scale step for bilinear sampling renders last pixel once for upsample.
     *dx = FixedDiv(Abs(src_width), dst_width);
-    *x = CENTERSTART(*dx, -32768);  // Subtract 0.5 (32768) to center filter.
     *dy = FixedDiv(src_height, dst_height);
+    *x = CENTERSTART(*dx, -32768);  // Subtract 0.5 (32768) to center filter.
     *y = CENTERSTART(*dy, -32768);  // Subtract 0.5 (32768) to center filter.
   } else if (filtering == kFilterLinear) {
     // Scale step for bilinear sampling renders last pixel once for upsample.
@@ -1271,7 +1271,7 @@ void ScaleSlope(int src_width,
   }
   // Negative src_width means horizontally mirror.
   if (src_width < 0) {
-    *x += (dst_width - 1) * *dx;
+    *x = -(*x) + (dst_width - 1) * *dx;
     *dx = -*dx;
     // src_width = -src_width;   // Caller must do this.
   }
